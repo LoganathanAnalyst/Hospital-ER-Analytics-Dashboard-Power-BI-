@@ -1,0 +1,174 @@
+Hospital ER Dashboard — Step-by-Step Guide
+Focused on three views: Monthly View, Consolidated View, Patient View
+Author: Loganathan
+Date: Generated Nov 30, 2025
+---
+Overview
+This guide provides step-by-step instructions to build three essential views for the Hospital ER Power BI
+dashboard:
+1. Monthly View — time-series and month-over-month performance for operational KPIs.
+2. Consolidated View — executive summary combining KPIs, bed utilization, staff metrics.
+3. Patient View — granular patient-level analytics and drillthrough details.
+Each section covers:
+- Data required
+- Power Query / ETL steps
+- Data modeling & relationships
+- Key DAX measures
+- Visuals & layout recommendations
+- Interactions, filters & bookmarks
+- Testing & validation
+- Deployment notes
+---
+1) MONTHLY VIEW
+Purpose: Show trends over months to identify seasonality, workloads, and capacity planning.
+Data Required:
+- PatientArrival table: PatientID, ArrivalDateTime, ArrivalMode, TriageLevel
+- Treatment table: PatientID, TreatmentStart, TreatmentEnd, Disposition
+- BedUsage table: Date, BedID, Status (Occupied/Available)
+- StaffShifts table: StaffID, ShiftDate, Role, HoursWorked
+Power Query (ETL) Steps:
+- Parse datetime fields: ensure ArrivalDateTime, TreatmentStart/End are DateTime types.
+- Create a Calendar table: Date, Year, Month, MonthNumber, MonthYear (e.g., '2025-11')
+- Aggregate tables by month where needed (e.g., monthly patient counts).
+- Fill down missing triage levels if possible or mark as Unknown.
+- Convert durations: TreatmentDuration = Duration in minutes between TreatmentEnd and TreatmentStart.
+Data Modeling:
+- Use star schema:
+- DimDate (Calendar) as central date dimension
+- FactPatientEvents (PatientID, DateKey, ArrivalCount=1, TreatmentDuration, TriageLevel, Disposition)
+- DimStaff, DimBed, DimTriageLevels
+- Relationship: FactPatientEvents[DateKey] -> DimDate[DateKey]; FactPatientEvents[StaffID] -> DimStaff[StaffID],
+etc.
+Key DAX Measures (examples):
+- Monthly Patient Count:
+Monthly Patients = DISTINCTCOUNT(FactPatientEvents[PatientID])
+- Avg Waiting Time (minutes):
+Avg Wait (min) = AVERAGEX(FactPatientEvents, FactPatientEvents[WaitDurationMinutes])
+- Treatment Time Avg:
+Avg Treatment (min) = AVERAGEX(FactPatientEvents, FactPatientEvents[TreatmentDuration])
+- Bed Utilization % (monthly):
+Bed Utilization % =
+DIVIDE(
+SUM(BedUsage[OccupiedHours]),
+SUM(BedUsage[TotalHours])
+)
+- MoM Growth:
+Patients MoM % =
+DIVIDE(
+[Monthly Patients] - CALCULATE([Monthly Patients], DATEADD(DimDate[Date], -1, MONTH)),
+CALCULATE([Monthly Patients], DATEADD(DimDate[Date], -1, MONTH))
+)
+Visuals & Layout:
+- Top row: KPI cards (Monthly Patients, Avg Wait, Avg Treatment, Bed Utilization %)
+- Middle: Line chart — Patients by Month (use continuous axis), with slicer for Year
+- Right: Column chart — Avg Wait by Month; Area chart for Bed Utilization
+- Bottom: Table or matrix with Month, Patients, Avg Wait, Avg Treatment, % Change
+- Use small multiples if splitting by Triage Level or Arrival Mode
+Interactions & Filters:
+- Slicer: Year, Department (if multiple), Triage Level
+- Enable cross-filtering: clicking a month filters other visuals
+- Add drillthrough to Patient View for that month's patient list
+Testing & Validation:
+- Compare monthly counts to source extracts (CSV/Excel) using same date logic
+- Validate treatment durations by spot-checking 10 random records
+- Check for timezone issues: ensure datetime fields align with hospital local time
+---
+2) CONSOLIDATED VIEW
+Purpose: Executive summary — one-page snapshot for leadership with trends and capacity signals.
+Data Required:
+- Aggregated KPI facts (daily or hourly), bed inventory, staffing summary, top issues
+- Reference tables: Departments, Units, ShiftPatterns
+ETL Steps:
+- Pre-aggregate heavy tables to daily granularity: daily patient count, daily avg wait, daily bed occupancy
+- Create summary tables: DepartmentSummary, StaffLoadSummary
+- Compute rolling metrics: 7-day avg wait time, 30-day avg patients
+Data Modeling:
+- Keep a FactDailyKPI table keyed by DateKey with measures pre-calculated (or computed via DAX)
+- Connect DimDate to FactDailyKPI
+- Use role-playing dimensions if needed (e.g., AdmissionDate vs DischargeDate)
+Key DAX Measures:
+- Current Day Patients = CALCULATE([Daily Patients], LASTDATE(DimDate[Date]))
+- 7-day Average Wait = AVERAGEX(DATESINPERIOD(DimDate[Date], LASTDATE(DimDate[Date]), -7, DAY),
+[Avg Wait (min)])
+- Occupancy Alert Flag:
+Occupancy Alert = IF([Bed Utilization %] > 0.85, "High", "Normal")
+Visuals & Layout:
+- Header: Big KPIs (Today Patients, Current Wait Time, Occupancy %, Staff Shortage Flag)
+- Left: Gauge or bullet chart for Occupancy % with threshold lines
+- Center: Compact trend charts (sparkline) for last 30 days
+- Right: Top 5 issues (e.g., longest waits, departments with most backlogs)
+- Footer: Suggested actions (text box) and data freshness info
+Interactions & UX:
+- Use bookmarks to switch between 'Normal' and 'Alert' layouts (showing recommendations)
+- Use tooltip pages for deeper context on each KPI
+- Create 'Export to PDF' button via Power Automate (if integrated) for daily reports
+Testing & Validation:
+- Ensure pre-aggregated numbers match ad-hoc calculations
+- Validate alert thresholds with clinical team
+- Test bookmark states and visibility toggles
+---
+3) PATIENT VIEW (Granular)
+Purpose: Patient-level exploration — supports operational teams and clinicians to trace individual journeys.
+Data Required:
+- Patient master: PatientID, Name (or pseudonymized ID), DOB, Gender
+- Arrival events: ArrivalDateTime, Mode, TriageLevel
+- Treatment events: TreatmentStart, TreatmentEnd, TreatingStaffID, Department
+- Disposition: Discharged/Admitted/Transferred, DischargeDateTime
+- Other optional: Diagnosis codes, Procedure codes
+ETL Steps:
+- Clean PatientID for consistent keys; consider pseudonymization for PHI protection
+- Calculate event timestamps and durations: WaitDuration = TreatmentStart - ArrivalDateTime
+- Create a 'PatientTimeline' fact with ordered events for each PatientID
+- Create flags for long-wait (WaitDuration > threshold), readmission within X days, etc.
+Data Modeling:
+- FactPatientTimeline linked to DimPatient, DimDate, DimStaff, DimDepartment
+- Consider using composite keys for event ordering if necessary
+Key DAX Measures & Calculated Columns:
+- WaitDurationMinutes (calculated column in Power Query or DAX)
+- IsLongWait = IF([WaitDurationMinutes] > 120, 1, 0) -- example threshold
+- Patient Total Time in ER = DATEDIFF(MIN(FactPatientTimeline[ArrivalDateTime]),
+MAX(FactPatientTimeline[DispositionDateTime]), MINUTE)
+- ReadmissionWithin7Days = measure comparing patient events
+Visuals & Layout:
+- Top: Patient selector (search box) or slicer (PatientID or anonymized name)
+- Left: Patient summary card (Arrival, TriageLevel, TreatmentTime, Disposition)
+- Center: Timeline visual (Gantt-like) showing arrival → triage → treatment → discharge
+- Right: Events table (chronological) with ability to click to see full event details
+- Bottom: Related Patients (e.g., same diagnosis) and patient notes (if permitted)
+Interactions & Privacy:
+- Implement Row-Level Security (RLS) to limit access to PHI
+- Pseudonymize patient names in shared environments
+- Log access / auditing if required by hospital policy
+Testing & Validation:
+- Verify individual patient timelines against source EMR for sample patients
+- Confirm duration calculations for edge cases (missing end times)
+- Ensure RLS works correctly by testing with test users
+---
+Common Best Practices Across All Views
+- Use a centralized DimDate and consistent DateKey across facts.
+- Prefer Power Query for heavy transformation; DAX for on-the-fly calculations.
+- Keep visuals simple: use 3–5 colors, clear titles, and tooltips.
+- Add data refresh timestamp on all dashboards.
+- Document assumptions (e.g., how wait time is calculated) in a 'Notes' page.
+- Performance: disable 'Auto Date/Time', use calculated tables sparingly, and optimize relationships.
+- Accessibility: ensure alt text for visuals and readable font sizes.
+Deployment & Publishing
+- Publish to Power BI Service workspace dedicated to Clinical Ops
+- Configure dataset refresh: schedule nightly or more frequently depending on need
+- Setup Row-Level Security before sharing with operational staff
+- Share dashboards via Apps for controlled distribution
+Appendix — Useful DAX Snippets
+- Moving Average (7 days):
+Moving Avg 7 = AVERAGEX(DATESINPERIOD(DimDate[Date], LASTDATE(DimDate[Date]), -7, DAY), [Daily
+Patients])
+- Distinct Patients in Period:
+Distinct Patients = CALCULATE(DISTINCTCOUNT(FactPatientEvents[PatientID]),
+DATESBETWEEN(DimDate[Date], STARTDATE, ENDDATE))
+- Time Difference in Minutes:
+WaitMinutes = DATEDIFF(FactPatientEvents[ArrivalDateTime], FactPatientEvents[TreatmentStart], MINUTE)
+Notes on Sensitive Data (PHI)
+- Only include personally identifiable information (PII) when necessary and permitted.
+- Prefer anonymized IDs for shared dashboards.
+- Follow hospital data governance and encryption for dataset storage.
+---
+End of Guide
