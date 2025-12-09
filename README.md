@@ -114,7 +114,7 @@ Feel free to open issues or submit pull requests.
 ---
 
 ## ⭐ Support This Project
-If you found this project helpful, consider giving it a ⭐ on GitHub — your support motivates further improvements!.
+If you found this project helpful, consider giving it a ⭐ on GitHub — your support motivates further improvements!
 
 ---
 
